@@ -1,0 +1,182 @@
+---
+title: "615 Assignment Strawberries 1"
+author: "Yiming Chen"
+date: "2024-10-02"
+output: pdf_document
+---
+#Preparing data for analysis —— Strawberries
+
+##read and explore the data
+```{r}
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+```
+
+Read the data and take a first look
+
+```{r}
+strawberry <- read_csv("strawberries25_v3.csv", col_names = TRUE)
+head(strawberry)
+```
+```{r}
+#remove the (D) term in Value and CV% columns
+strawberry <- strawberry %>%
+  mutate(
+    Value = ifelse(Value == "(D)", NA, Value),
+    `CV (%)` = ifelse(`CV (%)` == "(D)", NA, `CV (%)`)
+  )
+head(strawberry)
+```
+
+```{r}
+# do data cleaning for the Domain column, rearrange the info in this column into three columns: chemical category, name and number
+strawberry <- strawberry %>%
+  mutate(Category = case_when(
+    Domain == "Total" ~ NA_character_,
+    str_detect(Domain, "CHEMICAL") ~ str_trim(str_remove(Domain, "CHEMICAL, ")),
+    TRUE ~ Domain
+  ))
+unique(strawberry$Category)
+head(strawberry)
+```
+
+
+```{r}
+strawberry <- strawberry %>%
+  mutate(
+    Name = case_when(
+      Category == "TOTAL" ~ NA_character_,
+      str_detect(`Domain Category`, fixed(Category)) & str_detect(`Domain Category`, "\\(.*=.*\\)") ~ 
+        str_extract(`Domain Category`, "(?<=\\().*?(?=\\s?=)"),
+      str_detect(`Domain Category`, fixed(Category)) & str_detect(`Domain Category`, "\\(.*\\)") ~ 
+        str_extract(`Domain Category`, "(?<=\\().*?(?=\\))"),
+      TRUE ~ NA_character_
+    ),
+    Number = case_when(
+      Category == "TOTAL" ~ NA_real_,
+      str_detect(`Domain Category`, fixed(Category)) & str_detect(`Domain Category`, "\\(.*=.*\\)") ~ 
+        as.numeric(str_extract(`Domain Category`, "(?<=\\=\\s?).*?(?=\\))")),
+      str_detect(`Domain Category`, fixed(Category)) & str_detect(`Domain Category`, "\\(.*\\)") ~ 
+        NA_real_,
+      TRUE ~ NA_real_
+    )
+  )
+
+strawberry <- strawberry %>%
+  mutate(Category = case_when(
+    `Domain Category` == "NOT SPECIFIED" ~ NA_character_,
+    TRUE ~ Category
+  ))
+
+head(strawberry)
+```
+
+```{r}
+#data cleaning for AREA GROWN, the numerical intervals of the planted area are reintegrated inside the new columns, respectively, with the column names of Min and Max
+strawberry <- strawberry %>%
+  mutate(
+    Min = case_when(
+      str_detect(Name, "100 OR MORE ACRES") ~ 100,
+      str_detect(Name, "TO") ~ as.numeric(str_extract(Name, "^[0-9.]+")),
+      TRUE ~ NA_real_
+    ),
+    Max = case_when(
+      str_detect(Name, "100 OR MORE ACRES") ~ "MORE",
+      str_detect(Name, "TO") ~ str_extract(Name, "(?<=TO )^[0-9.]+"),
+      TRUE ~ NA_character_
+    )
+)
+
+# View the resulting data
+head(strawberry)
+```
+
+```{r}
+# Create a new column 'Unit' by extracting the substring after 'MEASURED'
+strawberry <- strawberry %>%
+  mutate(Unit = str_extract(strawberry$`Data Item`, "(?<=MEASURED ).*"))
+
+# Create a new column 'Type' by extracting either 'BEARING' or 'ORGANIC'
+strawberry <- strawberry %>%
+  mutate(Type = str_extract(strawberry$`Data Item`, "BEARING|ORGANIC"))
+
+# Create a new column 'Operation' by extracting the remaining parts of the string
+# Removing the 'MEASURED' part, the Unit and the Type, keeping the rest
+strawberry <- strawberry %>%
+  mutate(Operation = str_replace_all(strawberry$`Data Item`, "MEASURED.*|BEARING|ORGANIC", "") %>%
+           str_trim())
+
+# Create a new column 'Operation' by extracting the remaining parts of the string,
+# Removing the 'MEASURED', 'BEARING', 'ORGANIC', and 'STRAWBERRIES' parts
+strawberry <- strawberry %>%
+  mutate(Operation = str_replace_all(strawberry$`Data Item`, "MEASURED.*|BEARING|ORGANIC|STRAWBERRIES(, | - )", "") %>%
+           str_replace_all("[-,]", "") %>%
+           str_trim())
+
+# View the resulting dataset
+head(strawberry)
+view(strawberry)
+```
+
+```{r}
+# Export the cleaned dataset as a CSV file
+write.csv(strawberry, "cleaned_strawberries.csv", row.names = FALSE)
+```
+
+```{r}
+#EDA
+# Check data types
+str(strawberry)
+```
+
+```{r}
+# Convert 'Value' to numeric, removing non-numeric characters
+strawberry$Value <- as.numeric(gsub("[^0-9.]", "", strawberry$Value))
+
+# Convert 'CV (%)' to numeric, removing non-numeric characters (including %, parentheses)
+strawberry$`CV (%)` <- as.numeric(gsub("[^0-9.]", "", strawberry$`CV (%)`))
+
+# Check if conversion was successful
+str(strawberry$Value)
+str(strawberry$`CV (%)`)
+
+# Check for any NAs introduced after conversion
+sum(is.na(strawberry$Value))
+sum(is.na(strawberry$`CV (%)`))
+
+# Summary statistics for 'Value' and 'CV (%)'
+summary(strawberry$Value)
+summary(strawberry$`CV (%)`)
+
+# Check for missing values in 'Value' and 'CV (%)'
+sum(is.na(strawberry$Value))
+sum(is.na(strawberry$`CV (%)`))
+
+# Histogram for 'CV (%)'
+ggplot(strawberry, aes(x = `CV (%)`)) +
+  geom_histogram(binwidth = 1, col = "pink", fill = "pink") +
+  labs(title = "Distribution of CV (%)", x = "CV (%)", y = "Frequency")
+
+
+```
+The Value column shows a strong right skew with most data concentrated at lower values and only a few larger ones.
+The CV (%) column displays a more spread distribution. The frequent occurrence of CV values between 20% and 30% may indicate that this range represents the typical variation in the dataset. However, the existence of high CV values suggests that certain categories or items show much higher variability.
+
+
+```{r}
+# Bar plot for 'Type' column
+ggplot(strawberry, aes(x=Type)) +
+  geom_bar(fill="lightgreen") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  labs(title="Distribution of Type")
+```
+The BEARING type is the most common category in the Type column, while ORGANIC data points are minimal.
+The significant proportion of NA values suggests that a substantial amount of Type information is missing, which could have implications for further analyses or interpretations related to strawberry types.
+
+cite: Dayu tie, Yibing Wang, Chatgpt
